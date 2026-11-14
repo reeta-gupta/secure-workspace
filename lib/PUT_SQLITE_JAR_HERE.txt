@@ -1,0 +1,5 @@
+Put ONE sqlite-jdbc jar (xerial) in this folder, e.g. sqlite-jdbc-3.46.1.3.jar.
+Easiest: copy the jar from the lib folder of your old project.
+Otherwise download it from Maven Central:
+https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.46.1.3/sqlite-jdbc-3.46.1.3.jar
+(I could not bundle it: my environment has no access to that site.)
