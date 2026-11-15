@@ -139,6 +139,35 @@ public final class Services {
      * Administrator hands out a ONE-TIME ticket (128 random bits, valid 15 min, stored only as a hash).
      * The admin never sets or sees a password; the owner uses the ticket on the Forgot-password page to pick one.
      */
+    public record HelpRequest(int id,String username,String ip,long requestedMs){}
+    private static final int MAX_HELP_REQUESTS_PER_IP=10;
+    /** Public ("Ask administrator for help"). The reply is the same whether or not the account exists, so it cannot be used to discover usernames. */
+    public void requestHelp(String username,String ip)throws Exception{
+        username=username==null?"":username.trim();if(ip==null)ip="";
+        long now=System.currentTimeMillis();
+        try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM recovery_requests WHERE ip=? AND requested_ms>?")){
+            p.setString(1,ip);p.setLong(2,now-3600_000L);try(ResultSet r=p.executeQuery()){r.next();if(r.getInt(1)>=MAX_HELP_REQUESTS_PER_IP)throw new SecurityException("Too many help requests from this device. Please try again later.");}
+        }
+        int uid=-1;String role="";
+        try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("SELECT id,role FROM users WHERE username=?")){p.setString(1,username);try(ResultSet r=p.executeQuery()){if(r.next()){uid=r.getInt(1);role=r.getString(2);}}}
+        if(uid<0||"ADMIN".equals(role))return; // nothing stored, nothing revealed (admins recover with their own codes)
+        int n;
+        try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("UPDATE recovery_requests SET requested_ms=?,ip=? WHERE user_id=? AND status='OPEN'")){p.setLong(1,now);p.setString(2,ip);p.setInt(3,uid);n=p.executeUpdate();}
+        if(n==0)try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("INSERT INTO recovery_requests(user_id,username,ip,requested_ms) VALUES(?,?,?,?)")){p.setInt(1,uid);p.setString(2,username);p.setString(3,ip);p.setLong(4,now);p.executeUpdate();}
+        Db.log(uid,"RESET_HELP_REQUESTED","Asked the administrator for help from "+ip);
+    }
+    public List<HelpRequest> pendingRequests(int adminId)throws Exception{
+        if(!"ADMIN".equals(role(adminId)))throw new SecurityException("Administrator access required.");
+        List<HelpRequest> out=new ArrayList<>();
+        try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("SELECT id,username,COALESCE(ip,''),requested_ms FROM recovery_requests WHERE status='OPEN' ORDER BY requested_ms DESC LIMIT ?")){
+            p.setInt(1,50);try(ResultSet r=p.executeQuery()){while(r.next())out.add(new HelpRequest(r.getInt(1),r.getString(2),r.getString(3),r.getLong(4)));}
+        }return out;
+    }
+    public void dismissRequest(int adminId,int requestId)throws Exception{
+        if(!"ADMIN".equals(role(adminId)))throw new SecurityException("Administrator access required.");
+        try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("UPDATE recovery_requests SET status='DISMISSED',closed_ms=? WHERE id=? AND status='OPEN'")){p.setLong(1,System.currentTimeMillis());p.setInt(2,requestId);p.executeUpdate();}
+        Db.log(adminId,"RESET_HELP_DISMISSED","Help request "+requestId+" dismissed");
+    }
     public String issueResetTicket(int adminId,String username)throws Exception{
         if(!"ADMIN".equals(role(adminId)))throw new SecurityException("Administrator access required.");
         username=username==null?"":username.trim();
@@ -156,6 +185,7 @@ public final class Services {
             try(PreparedStatement p=c.prepareStatement("INSERT INTO reset_tickets(user_id,token_hash,created_by,created_ms,expires_ms) VALUES(?,?,?,?,?)")){p.setInt(1,target);p.setString(2,Security.sha256("T:"+Security.normalizeTicket(ticket)));p.setInt(3,adminId);p.setLong(4,now);p.setLong(5,now+TICKET_TTL_MS);p.executeUpdate();}
             c.commit();
         }
+        try(Connection c=Db.open();PreparedStatement p=c.prepareStatement("UPDATE recovery_requests SET status='DONE',closed_ms=? WHERE user_id=? AND status='OPEN'")){p.setLong(1,now);p.setInt(2,target);p.executeUpdate();}
         Db.log(adminId,"RESET_TICKET_ISSUED","Reset ticket issued for "+username+" (single use, 15 minutes). Admin does not see or set the password.");
         return ticket;
     }

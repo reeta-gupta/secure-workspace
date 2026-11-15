@@ -51,6 +51,9 @@ public final class Db {
             s.executeUpdate("CREATE INDEX IF NOT EXISTS ix_reset_attempts_ip ON reset_attempts(ip,at_ms)");
             // Login brute-force throttling (same shape as reset_attempts; failed sign-ins only).
             s.executeUpdate("CREATE TABLE IF NOT EXISTS login_attempts(id INTEGER PRIMARY KEY, username TEXT NOT NULL, ip TEXT, at_ms INTEGER NOT NULL)");
+            // "Ask the administrator for help": a visible request only. It carries no secret and grants nothing by itself.
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS recovery_requests(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, username TEXT NOT NULL, ip TEXT, requested_ms INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', closed_ms INTEGER)");
+            s.executeUpdate("CREATE INDEX IF NOT EXISTS ix_recovery_requests_status ON recovery_requests(status,requested_ms)");
             s.executeUpdate("CREATE INDEX IF NOT EXISTS ix_login_attempts_user ON login_attempts(username,at_ms)");
             s.executeUpdate("CREATE INDEX IF NOT EXISTS ix_login_attempts_ip ON login_attempts(ip,at_ms)");
         }
